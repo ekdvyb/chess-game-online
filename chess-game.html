@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Game</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <style>
+        /* Previous styles remain the same */
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        #game-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        #board {
+            width: 400px;
+            height: 400px;
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            border: 2px solid #333;
+        }
+
+        .square {
+            width: 50px;
+            height: 50px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 35px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .white {
+            background-color: #f0d9b5;
+        }
+
+        .black {
+            background-color: #b58863;
+        }
+
+        .selected {
+            background-color: #7b61ff;
+        }
+
+        .possible-move {
+            background-color: #90EE90;
+        }
+
+        #status {
+            margin-top: 20px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        #move-history {
+            margin-top: 20px;
+            max-height: 200px;
+            overflow-y: auto;
+            width: 400px;
+            padding: 10px;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .button:hover {
+            background-color: #45a049;
+        }
+
+        .difficulty-select {
+            margin: 10px 0;
+            padding: 5px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-options">
+        <h2>Choose Game Mode</h2>
+        <button class="button" onclick="startGame('human')">Play vs Human</button>
+        <button class="button" onclick="startGame('computer')">Play vs Computer</button>
+        <select id="difficulty" class="difficulty-select">
+            <option value="2">Easy</option>
+            <option value="3">Medium</option>
+            <option value="4">Hard</option>
+        </select>
+    </div>
+    <div id="game-container">
+        <h1>Chess Game</h1>
+        <div id="board"></div>
+        <div id="status">Select game mode to start</div>
+        <div id="move-history"></div>
+        <button class="button" onclick="resetGame()" style="margin-top: 20px;">Reset Game</button>
+    </div>
+
+    <script>
+        const board = document.getElementById('board');
+        const status = document.getElementById('status');
+        const moveHistory = document.getElementById('move-history');
+        let game = new Chess();
+        let selectedSquare = null;
+        let gameMode = null;
+        let playerColor = 'w';
+        let isComputerThinking = false;
+
+        // Chess piece Unicode characters
+        const pieces = {
+            'k': '♔', 'q': '♕', 'r': '♖', 'b': '♗', 'n': '♘', 'p': '♙',
+            'K': '♚', 'Q': '♛', 'R': '♜', 'B': '♝', 'N': '♞', 'P': '♟'
+        };
+
+        function startGame(mode) {
+            gameMode = mode;
+            resetGame();
+            if (mode === 'computer') {
+                playerColor = 'w'; // Player always plays as white against computer
+                status.textContent = "Playing against computer (You are White)";
+                // If computer should play first (as black), make its move
+                if (game.turn() !== playerColor) {
+                    setTimeout(makeComputerMove, 500);
+                }
+            } else {
+                status.textContent = "Playing against human (White's turn)";
+            }
+        }
+
+        function resetGame() {
+            game = new Chess();
+            selectedSquare = null;
+            moveHistory.innerHTML = '';
+            createBoard();
+            updateStatus();
+            isComputerThinking = false;
+        }
+
+        function createBoard() {
+            board.innerHTML = '';
+            for (let i = 0; i < 8; i++) {
+                for (let j = 0; j < 8; j++) {
+                    const square = document.createElement('div');
+                    square.className = `square ${(i + j) % 2 === 0 ? 'white' : 'black'}`;
+                    square.dataset.position = `${String.fromCharCode(97 + j)}${8 - i}`;
+                    square.addEventListener('click', handleSquareClick);
+                    board.appendChild(square);
+                }
+            }
+            updateBoard();
+        }
+
+        function updateBoard() {
+            const squares = document.querySelectorAll('.square');
+            squares.forEach(square => {
+                const position = square.dataset.position;
+                const piece = game.get(position);
+                square.textContent = piece ? pieces[piece.type.toUpperCase()] : '';
+                if (piece) {
+                    square.style.color = piece.color === 'w' ? 'white' : 'black';
+                }
+            });
+        }
+
+        function handleSquareClick(event) {
+            // Prevent moves if game hasn't started or computer is thinking
+            if (gameMode === null || isComputerThinking) return;
+            
+            // In computer mode, only allow moves during player's turn
+            if (gameMode === 'computer' && game.turn() !== playerColor) return;
+
+            const square = event.target;
+            const position = square.dataset.position;
+
+            clearHighlights();
+
+            if (selectedSquare === null) {
+                // First click - select piece
+                const piece = game.get(position);
+                if (piece && piece.color === game.turn()) {
+                    selectedSquare = position;
+                    square.classList.add('selected');
+                    showPossibleMoves(position);
+                }
+            } else {
+                // Second click - attempt to move
+                const move = {
+                    from: selectedSquare,
+                    to: position,
+                    promotion: 'q' // Always promote to queen for simplicity
+                };
+
+                try {
+                    const moveResult = game.move(move);
+                    if (moveResult) {
+                        updateBoard();
+                        updateStatus();
+                        addMoveToHistory(moveResult);
+
+                        // If in computer mode and it's computer's turn, make computer move
+                        if (gameMode === 'computer' && !game.game_over()) {
+                            isComputerThinking = true;
+                            status.textContent = "Computer is thinking...";
+                            setTimeout(makeComputerMove, 500);
+                        }
+                    }
+                } catch (e) {
+                    // Invalid move
+                }
+                selectedSquare = null;
+            }
+        }
+
+        function makeComputerMove() {
+            if (game.game_over() || gameMode !== 'computer') return;
+
+            const depth = parseInt(document.getElementById('difficulty').value);
+            const move = getBestMove(depth);
+            
+            if (move) {
+                game.move(move);
+                updateBoard();
+                updateStatus();
+                addMoveToHistory(move);
+            }
+            
+            isComputerThinking = false;
+            updateStatus();
+        }
+
+        function getBestMove(depth) {
+            let bestMove = null;
+            let bestValue = -9999;
+            const moves = game.moves({ verbose: true });
+
+            for (let i = 0; i < moves.length; i++) {
+                const move = moves[i];
+                game.move(move);
+                const value = -minimax(depth - 1, -10000, 10000, false);
+                game.undo();
+                
+                if (value >= bestValue) {
+                    bestValue = value;
+                    bestMove = move;
+                }
+            }
+            return bestMove;
+        }
+
+        function evaluateBoard() {
+            let totalEvaluation = 0;
+            const pieceValue = {
+                'p': 10, 'n': 30, 'b': 30,
+                'r': 50, 'q': 90, 'k': 900
+            };
+
+            for (let i = 0; i < 8; i++) {
+                for (let j = 0; j < 8; j++) {
+                    const square = String.fromCharCode(97 + j) + (8 - i);
+                    const piece = game.get(square);
+                    if (piece) {
+                        const value = pieceValue[piece.type];
+                        totalEvaluation += piece.color === 'w' ? value : -value;
+                    }
+                }
+            }
+            return totalEvaluation;
+        }
+
+        function minimax(depth, alpha, beta, isMaximizing) {
+            if (depth === 0) {
+                return evaluateBoard();
+            }
+
+            const moves = game.moves({ verbose: true });
+
+            if (isMaximizing) {
+                let maxEval = -9999;
+                for (const move of moves) {
+                    game.move(move);
+                    const eval = minimax(depth - 1, alpha, beta, false);
+                    game.undo();
+                    maxEval = Math.max(maxEval, eval);
+                    alpha = Math.max(alpha, eval);
+                    if (beta <= alpha) break;
+                }
+                return maxEval;
+            } else {
+                let minEval = 9999;
+                for (const move of moves) {
+                    game.move(move);
+                    const eval = minimax(depth - 1, alpha, beta, true);
+                    game.undo();
+                    minEval = Math.min(minEval, eval);
+                    beta = Math.min(beta, eval);
+                    if (beta <= alpha) break;
+                }
+                return minEval;
+            }
+        }
+
+        function showPossibleMoves(position) {
+            const moves = game.moves({ square: position, verbose: true });
+            moves.forEach(move => {
+                const square = document.querySelector(`[data-position="${move.to}"]`);
+                if (square) {
+                    square.classList.add('possible-move');
+                }
+            });
+        }
+
+        function clearHighlights() {
+            const squares = document.querySelectorAll('.square');
+            squares.forEach(square => {
+                square.classList.remove('selected', 'possible-move');
+            });
+        }
+
+        function updateStatus() {
+            let statusText = '';
+            if (game.isCheckmate()) {
+                statusText = `Checkmate! ${game.turn() === 'w' ? 'Black' : 'White'} wins!`;
+            } else if (game.isDraw()) {
+                statusText = 'Game Over - Draw!';
+            } else {
+                if (gameMode === 'computer') {
+                    if (isComputerThinking) {
+                        statusText = 'Computer is thinking...';
+                    } else {
+                        statusText = game.turn() === playerColor ? 'Your turn' : 'Computer\'s turn';
+                    }
+                } else {
+                    statusText = `${game.turn() === 'w' ? 'White' : 'Black'}'s turn`;
+                }
+                if (game.isCheck()) {
+                    statusText += ' (Check!)';
+                }
+            }
+            status.textContent = statusText;
+        }
+
+        function addMoveToHistory(move) {
+            const moveText = document.createElement('div');
+            moveText.textContent = `${game.turn() === 'w' ? 'Black' : 'White'}: ${move.from} to ${move.to}`;
+            moveHistory.appendChild(moveText);
+            moveHistory.scrollTop = moveHistory.scrollHeight;
+        }
+
+        // Initialize the game
+        createBoard();
+    </script>
+</body>
+</html>
